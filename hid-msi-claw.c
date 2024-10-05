@@ -121,8 +121,9 @@ static int msi_claw_read(struct hid_device *hdev, u8 *const buffer)
 	// Add here what did not work
 	//ret = hid_hw_raw_request(hdev, MSI_CLAW_FEATURE_GAMEPAD_REPORT_ID, dmabuf, 8, HID_INPUT_REPORT, HID_REQ_GET_REPORT);
 	//ret = hid_hw_raw_request(hdev, 0x06, dmabuf, 8, HID_FEATURE_REPORT, HID_REQ_GET_REPORT);
-	ret = hid_hw_raw_request(hdev, MSI_CLAW_FEATURE_GAMEPAD_REPORT_ID, dmabuf, 8, HID_FEATURE_REPORT, HID_REQ_GET_REPORT);
-
+	//ret = hid_hw_raw_request(hdev, MSI_CLAW_FEATURE_GAMEPAD_REPORT_ID, dmabuf, 8, HID_FEATURE_REPORT, HID_REQ_GET_REPORT);
+	ret = hid_hw_raw_request(hdev, 0x82, dmabuf, 8, HID_FEATURE_REPORT, HID_REQ_GET_REPORT);
+	//                             or 0x81?
 	if (ret >= 8) {
 		hid_err(hdev, "hid-msi-claw read %d bytes: %02x %02x %02x %02x %02x %02x %02x %02x \n", ret,
 			dmabuf[0], dmabuf[1], dmabuf[2], dmabuf[3], dmabuf[4], dmabuf[5], dmabuf[6], dmabuf[7]);
