@@ -408,6 +408,11 @@ static void msi_claw_remove(struct hid_device *hdev)
 	hid_hw_stop(hdev);
 }
 
+static int msi_claw_resume(struct hid_device *hdev)
+{
+	return msi_claw_probe(hdev, NULL);// re-apply xpad mode on resume
+}
+
 static const struct hid_device_id msi_claw_devices[] = {
 	{ HID_USB_DEVICE(0x0DB0, 0x1901) },
 	{ }
@@ -419,6 +424,7 @@ static struct hid_driver msi_claw_driver = {
 	.id_table		= msi_claw_devices,
 	.probe			= msi_claw_probe,
 	.remove			= msi_claw_remove,
+	.resume         = msi_claw_resume,
 	//.input_mapping	= msi_claw_input_mapping,
 	//.event		= msi_claw_event,
 	//.raw_event		= msi_claw_raw_event
