@@ -308,7 +308,7 @@ static ssize_t debug_read_show(struct device *dev, struct device_attribute *attr
 }
 static DEVICE_ATTR_RO(debug_read);
 
-static int msi_claw_probe(struct hid_device *hdev, const struct hid_device_id *id)
+static int msi_claw_enable_xpad_mode(struct hid_device *hdev)
 {
 	int ret;
 	struct msi_claw_drvdata *drvdata;
@@ -393,6 +393,11 @@ err_stop_hw:
 	return ret;
 }
 
+static int msi_claw_probe(struct hid_device *hdev, const struct hid_device_id *id)
+{
+	return msi_claw_enable_xpad_mode(hdev);
+}
+
 static void msi_claw_remove(struct hid_device *hdev)
 {
 	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
@@ -410,7 +415,8 @@ static void msi_claw_remove(struct hid_device *hdev)
 
 static int msi_claw_resume(struct hid_device *hdev)
 {
-	return msi_claw_probe(hdev, NULL);// re-apply xpad mode on resume
+	sleep(1);// give the hardware a second to wake up
+	return msi_claw_enable_xpad_mode(hdev);// re-apply xpad mode on resume
 }
 
 static const struct hid_device_id msi_claw_devices[] = {
