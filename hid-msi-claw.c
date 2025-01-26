@@ -384,7 +384,8 @@ static int msi_claw_probe(struct hid_device *hdev, const struct hid_device_id *i
 		drvdata->control = devm_kzalloc(&hdev->dev, sizeof(*(drvdata->control)), GFP_KERNEL);
 		if (drvdata->control == NULL) {
 			hid_err(hdev, "hid-msi-claw can't alloc control interface data\n");
-			return -ENOMEM;
+			ret = -ENOMEM;
+			goto err_close;
 		}
 
 		drvdata->control->gamepad_mode = MSI_CLAW_GAMEPAD_MODE_XINPUT;
