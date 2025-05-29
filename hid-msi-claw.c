@@ -7,7 +7,8 @@
 
 #define MSI_CLAW_FEATURE_GAMEPAD_REPORT_ID 0x0f
 
-#define MSI_CLAW_READ_SIZE 8
+#define MSI_CLAW_READ_SIZE 64
+#define MSI_CLAW_WRITE_SIZE 64
 
 #define MSI_CLAW_GAME_CONTROL_DESC   0x05
 #define MSI_CLAW_DEVICE_CONTROL_DESC 0x06
@@ -40,6 +41,7 @@ static const struct {
 enum msi_claw_mkeys_function {
 	MSI_CLAW_MKEY_FUNCTION_MACRO = 0x00,
 	MSI_CLAW_MKEY_FUNCTION_COMBINATION = 0x01,
+	MSI_CLAW_MKEY_FUNCTION_DISABLED = 0x02,
 };
 
 static const char* mkeys_function_map[] =
@@ -57,7 +59,7 @@ enum msi_claw_command_type {
 	MSI_CLAW_COMMAND_TYPE_ACK = 0x06,
 	MSI_CLAW_COMMAND_TYPE_SWITCH_PROFILE = 0x07,
 	MSI_CLAW_COMMAND_TYPE_WRITE_PROFILE_TO_EEPROM = 0x08,
-	MSI_CLAW_COMMAND_TYPE_READ_FIRMWARE_VERSION = 0x09,
+	MSI_CLAW_COMMAND_TYPE_SYNC_RGB = 0x09,
 	MSI_CLAW_COMMAND_TYPE_READ_RGB_STATUS_ACK = 0x0a,
 	MSI_CLAW_COMMAND_TYPE_READ_CURRENT_PROFILE = 0x0b,
 	MSI_CLAW_COMMAND_TYPE_READ_CURRENT_PROFILE_ACK = 0x0c,
@@ -70,7 +72,7 @@ enum msi_claw_command_type {
 	MSI_CLAW_COMMAND_TYPE_RESET_DEVICE = 0x28,
 	MSI_CLAW_COMMAND_TYPE_RGB_CONTROL = 0xe0,
 	MSI_CLAW_COMMAND_TYPE_CALIBRATION_CONTROL = 0xfd,
-	MSI_CLAW_COMMAND_TYPE_CALIBRATION_ACK = 0xff,
+	MSI_CLAW_COMMAND_TYPE_CALIBRATION_ACK = 0xfe,
 };
 
 struct msi_claw_control_status {
@@ -87,25 +89,30 @@ struct msi_claw_drvdata {
 };
 
 static int msi_claw_write_cmd(struct hid_device *hdev, enum msi_claw_command_type cmdtype,
-        u8 b1, u8 b2, u8 b3)
+    const u8 *const buffer, size_t buffer_len)
 {
 	int ret;
-	const unsigned char buf[] = {
-		MSI_CLAW_FEATURE_GAMEPAD_REPORT_ID, 0, 0, 0x3c,
-		cmdtype, b1, b2, b3
-	};
-	unsigned char *dmabuf = kmemdup(buf, sizeof(buf), GFP_KERNEL);
+	const u8 buf[MSI_CLAW_WRITE_SIZE] = {
+		MSI_CLAW_FEATURE_GAMEPAD_REPORT_ID, 0, 0, 0x3c, cmdtype };
+	if (buffer != NULL) {
+		memcpy((void*)&buf[5], buffer, buffer_len);
+	} else {
+		buffer_len = 0;
+	}
+
+	memset((void*)&buf[5 + buffer_len], 0, MSI_CLAW_WRITE_SIZE - (5 + buffer_len));
+	u8 *const dmabuf = kmemdup(buf, MSI_CLAW_WRITE_SIZE, GFP_KERNEL);
 	if (!dmabuf) {
 		ret = -ENOMEM;
 		hid_err(hdev, "hid-msi-claw failed to alloc dma buf: %d\n", ret);
 		return ret;
 	}
 
-	ret = hid_hw_output_report(hdev, dmabuf, sizeof(buf));
+	ret = hid_hw_output_report(hdev, dmabuf, MSI_CLAW_WRITE_SIZE);
 
 	kfree(dmabuf);
 
-	if (ret != sizeof(buf)) {
+	if (ret != MSI_CLAW_WRITE_SIZE) {
 		hid_err(hdev, "hid-msi-claw failed to switch controller mode: %d\n", ret);
 		return ret;
 	}
@@ -155,7 +162,7 @@ static int sync_to_rom(struct hid_device *hdev) {
 		return ret;
 	}
 
-	ret = msi_claw_write_cmd(hdev, MSI_CLAW_COMMAND_TYPE_SYNC_TO_ROM, 0x00, 0x00, 0x00);
+	ret = msi_claw_write_cmd(hdev, MSI_CLAW_COMMAND_TYPE_SYNC_TO_ROM, NULL, 0);
 	if (ret) {
 		hid_err(hdev, "hid-msi-claw failed to send write request for switch controller mode: %d\n", ret);
 		return ret;
@@ -169,9 +176,7 @@ static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_g
 {
 	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
 	u8 buffer[MSI_CLAW_READ_SIZE] = {};
-	const u8 mode_byte = (u8)mode;
-	const u8 mkeys_byte = (u8)mkeys;
-	const u8 unknown_byte = 0x00;
+	const u8 cmd_buffer[2] = {(u8)mode, (u8)mkeys};
 
 	int ret;
 
@@ -182,20 +187,20 @@ static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_g
 	}
 
 	// 0f00003c240100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-	ret = msi_claw_write_cmd(hdev, MSI_CLAW_COMMAND_TYPE_SWITCH_MODE, mode_byte, mkeys_byte, unknown_byte);
+	ret = msi_claw_write_cmd(hdev, MSI_CLAW_COMMAND_TYPE_SWITCH_MODE, cmd_buffer, sizeof(cmd_buffer));
 	if (ret) {
 		hid_err(hdev, "hid-msi-claw failed to send write request for switch controller mode: %d\n", ret);
 		return ret;
 	}
 
-	drvdata->control->gamepad_mode = mode;
-
 	// 0f00003c260000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-	ret = msi_claw_write_cmd(hdev, MSI_CLAW_COMMAND_TYPE_READ_GAMEPAD_MODE, (u8)0, (u8)0, (u8)0);
+	ret = msi_claw_write_cmd(hdev, MSI_CLAW_COMMAND_TYPE_READ_GAMEPAD_MODE, cmd_buffer, sizeof(cmd_buffer));
 	if (ret) {
 		hid_err(hdev, "hid-msi-claw failed to send read request for controller mode: %d\n", ret);
 		return ret;
 	}
+
+	msleep(4);
 
 	// here goes the actual read call and the check.
 	// an example response is: 1000003c270100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -214,16 +219,16 @@ static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_g
 			hid_err(hdev, "hid-msi-claw not the correct data.\n");
 		} else if (buffer[4] != (u8)MSI_CLAW_COMMAND_TYPE_GAMEPAD_MODE_ACK) {
 			hid_err(hdev, "hid-msi-claw not command type ACK.\n");
-		} else if (buffer[5] != mode_byte) {
-			hid_err(hdev, "hid-msi-claw invalid gamepad mode.\n");
-		} else if (buffer[6] != mkeys_byte) {
-			hid_err(hdev, "hid-msi-claw invalid mkeys mode.\n");
-		} else if (buffer[6] != unknown_byte) {
-			hid_err(hdev, "hid-msi-claw invalid status.\n");
+		}
+		
+		ret = memcmp(cmd_buffer, &buffer[5], sizeof(cmd_buffer));
+		if (ret) {
+			hid_err(hdev, "hid-msi-claw not in desired state.\n");
 		}
 	}
 
-	// assuming the read result is the expected one
+	// we have received the ack from the device: it is in the correct state
+	drvdata->control->gamepad_mode = mode;
 	drvdata->control->mkeys_function = mkeys;
 
 	// the device now sends back 03 00 00 00 00 00 00 00 00
@@ -511,6 +516,7 @@ static void msi_claw_remove(struct hid_device *hdev)
 		sysfs_remove_file(&hdev->dev.kobj, &dev_attr_mkeys_function_current.attr);
 	}
 
+	hid_hw_close(hdev);
 	hid_hw_stop(hdev);
 }
 
