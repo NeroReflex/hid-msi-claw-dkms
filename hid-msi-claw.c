@@ -145,6 +145,24 @@ msi_claw_read_err:
 	return ret;
 }
 
+static int sync_to_rom(struct hid_device *hdev) {
+	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
+
+	int ret;
+
+	if (!drvdata->control) {
+		hid_err(hdev, "hid-msi-claw couldn't find control interface\n");
+		ret = -ENODEV;
+		return ret;
+	}
+
+	ret = msi_claw_write_cmd(hdev, MSI_CLAW_COMMAND_TYPE_SYNC_TO_ROM, 0x00, 0x00, 0x00);
+	if (ret) {
+		hid_err(hdev, "hid-msi-claw failed to send write request for switch controller mode: %d\n", ret);
+		return ret;
+	}
+}
+
 static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_gamepad_mode mode,
 	enum msi_claw_mkeys_function mkeys)
 {
@@ -181,7 +199,7 @@ static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_g
 	// here goes the actual read call and the check.
 	// an example response is: 1000003c270100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 	// wireshark shows 64 bytes, but it does so for host->device too and we know 8 bytes are to be sent.
-	res = msi_claw_read(hdev, buffer);
+	ret = msi_claw_read(hdev, buffer);
 	if (res) {
 		hid_err(hdev, "hid-msi-claw failed to read: %d\n", ret);
 		// return ret;
@@ -189,18 +207,18 @@ static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_g
 	// TODO: uncomment the return above and this else
 	else {
 		if (buffer[0] != 0x10) {
-			hid_err(hdev, "hid-msi-claw unexpected destination in readback buffer\n", ret);
+			hid_err(hdev, "hid-msi-claw unexpected destination in readback buffer\n");
 			//return -EINVAL;
 		} else if (buffer[3] != (u8)0x3c) {
-			hid_err(hdev, "hid-msi-claw not the correct data.\n", ret);
+			hid_err(hdev, "hid-msi-claw not the correct data.\n");
 		} else if (buffer[4] != (u8)MSI_CLAW_COMMAND_TYPE_GAMEPAD_MODE_ACK) {
-			hid_err(hdev, "hid-msi-claw not command type ACK.\n", ret);
+			hid_err(hdev, "hid-msi-claw not command type ACK.\n");
 		} else if (buffer[5] != mode_byte) {
-			hid_err(hdev, "hid-msi-claw invalid gamepad mode.\n", ret);
+			hid_err(hdev, "hid-msi-claw invalid gamepad mode.\n");
 		} else if (buffer[6] != mkeys_byte) {
-			hid_err(hdev, "hid-msi-claw invalid mkeys mode.\n", ret);
+			hid_err(hdev, "hid-msi-claw invalid mkeys mode.\n");
 		} else if (buffer[6] != unknown_byte) {
-			hid_err(hdev, "hid-msi-claw invalid status.\n", ret);
+			hid_err(hdev, "hid-msi-claw invalid status.\n");
 		}
 	}
 
@@ -217,24 +235,6 @@ static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_g
 	}
 
 	return 0;
-}
-
-static int sync_to_rom(struct hid_device *hdev) {
-	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
-
-	int ret;
-
-	if (!drvdata->control) {
-		hid_err(hdev, "hid-msi-claw couldn't find control interface\n");
-		ret = -ENODEV;
-		return ret;
-	}
-
-	ret = msi_claw_write_cmd(hdev, MSI_CLAW_COMMAND_TYPE_SYNC_TO_ROM, 0x00, 0x00, 0x00);
-	if (ret) {
-		hid_err(hdev, "hid-msi-claw failed to send write request for switch controller mode: %d\n", ret);
-		return ret;
-	}
 }
 
 static ssize_t gamepad_mode_available_show(struct device *dev, struct device_attribute *attr, char *buf)
