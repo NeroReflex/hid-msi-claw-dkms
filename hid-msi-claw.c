@@ -147,7 +147,6 @@ msi_claw_read_err:
 
 static int sync_to_rom(struct hid_device *hdev) {
 	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
-
 	int ret;
 
 	if (!drvdata->control) {
@@ -161,6 +160,8 @@ static int sync_to_rom(struct hid_device *hdev) {
 		hid_err(hdev, "hid-msi-claw failed to send write request for switch controller mode: %d\n", ret);
 		return ret;
 	}
+
+	return ret;
 }
 
 static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_gamepad_mode mode,
@@ -200,7 +201,7 @@ static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_g
 	// an example response is: 1000003c270100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 	// wireshark shows 64 bytes, but it does so for host->device too and we know 8 bytes are to be sent.
 	ret = msi_claw_read(hdev, buffer);
-	if (res) {
+	if (ret) {
 		hid_err(hdev, "hid-msi-claw failed to read: %d\n", ret);
 		// return ret;
 	}
