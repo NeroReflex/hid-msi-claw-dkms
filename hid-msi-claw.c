@@ -128,7 +128,7 @@ static int msi_claw_read(struct hid_device *hdev, u8 *const buffer)
 	if (ret >= 8) {
 		hid_err(hdev, "hid-msi-claw read %d bytes: %02x %02x %02x %02x %02x %02x %02x %02x \n", ret,
 			dmabuf[0], dmabuf[1], dmabuf[2], dmabuf[3], dmabuf[4], dmabuf[5], dmabuf[6], dmabuf[7]);
-		memcpy((void*)buffer, dmabuf, 8);
+		memcpy((void*)buffer, dmabuf, MSI_CLAW_READ_SIZE);
 		ret = 0;
 	} else if (ret < 0) {
 		hid_err(hdev, "hid-msi-claw failed to read: %d\n", ret);
