@@ -147,7 +147,6 @@ static int msi_claw_read(struct hid_device *hdev, uint8_t *const buffer, int siz
 
 			if (event != NULL) {
 				drvdata->read_data = event->next;
-				event->next = NULL;
 			}
 		}
 	}
@@ -156,8 +155,6 @@ static int msi_claw_read(struct hid_device *hdev, uint8_t *const buffer, int siz
 		ret = -EIO;
 		hid_err(hdev, "hid-msi-claw no answer from device\n");
 		goto msi_claw_read_err;
-	} else {
-		hid_notice(hdev, "hid-msi-claw command 0x%02x\n", event->data[4]);
 	}
 
 	if (size < event->size) {
@@ -168,10 +165,12 @@ static int msi_claw_read(struct hid_device *hdev, uint8_t *const buffer, int siz
 
 	memcpy((void*)buffer, (const void*)event->data, event->size);
 
-	kfree((void*)event->data);
-	kfree((void*)event);
-
 msi_claw_read_err:
+	if (event != NULL) {
+		kfree((void*)event->data);
+		kfree((void*)event);
+	}
+
 	return ret;
 }
 
@@ -285,6 +284,7 @@ static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_g
 	
 	if (buffer[4] != (uint8_t)MSI_CLAW_COMMAND_TYPE_ACK) {
 		hid_err(hdev, "hid-msi-claw received invalid response: expected 0x06, got 0x%02x\n", buffer[4]);
+		return -EINVAL;
 	}
 
 	// 0f00003c260000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -292,6 +292,17 @@ static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_g
 	if (ret) {
 		hid_err(hdev, "hid-msi-claw failed to send read request for controller mode: %d\n", ret);
 		return ret;
+	}
+
+	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 60);
+	if (ret) {
+		hid_err(hdev, "hid-msi-claw failed to read: %d\n", ret);
+		return ret;
+	}
+	
+	if (buffer[4] != (uint8_t)MSI_CLAW_COMMAND_TYPE_ACK) {
+		hid_err(hdev, "hid-msi-claw received invalid response: expected 0x06, got 0x%02x\n", buffer[4]);
+		return -EINVAL;
 	}
 
 	// here goes the actual read call and the check.
