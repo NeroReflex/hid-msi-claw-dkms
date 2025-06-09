@@ -22,6 +22,16 @@ enum msi_claw_gamepad_mode {
 	MSI_CLAW_GAMEPAD_MODE_DESKTOP = 0x04,
 	MSI_CLAW_GAMEPAD_MODE_BIOS = 0x05,
 	MSI_CLAW_GAMEPAD_MODE_TESTING = 0x06,
+
+	MSI_CLAW_GAMEPAD_MODE_MAX,
+};
+
+enum msi_claw_mkeys_function {
+	MSI_CLAW_MKEY_FUNCTION_MACRO = 0x00,
+	MSI_CLAW_MKEY_FUNCTION_COMBINATION = 0x01,
+	MSI_CLAW_MKEY_FUNCTION_DISABLED = 0x02,
+
+	MSI_CLAW_MKEY_FUNCTION_MAX,
 };
 
 static const bool gamepad_mode_debug = false;
@@ -37,12 +47,6 @@ static const struct {
 	{"desktop", true},
 	{"bios", gamepad_mode_debug},
 	{"testing", gamepad_mode_debug},
-};
-
-enum msi_claw_mkeys_function {
-	MSI_CLAW_MKEY_FUNCTION_MACRO = 0x00,
-	MSI_CLAW_MKEY_FUNCTION_COMBINATION = 0x01,
-	MSI_CLAW_MKEY_FUNCTION_DISABLED = 0x02,
 };
 
 static const char* mkeys_function_map[] =
@@ -276,15 +280,23 @@ static int msi_claw_read_gamepad_mode(struct hid_device *hdev,
 		goto msi_claw_read_gamepad_mode_err;
 	}
 	
-	if (buffer[4] != (uint8_t)MSI_CLAW_COMMAND_TYPE_ACK) {
+	if (buffer[4] != (uint8_t)MSI_CLAW_COMMAND_TYPE_GAMEPAD_MODE_ACK) {
 		hid_err(hdev, "hid-msi-claw received invalid response: expected 0x06, got 0x%02x\n", buffer[4]);
 		ret = -EINVAL;
 		goto msi_claw_read_gamepad_mode_err;
+	} else if (buffer[5] >= MSI_CLAW_GAMEPAD_MODE_MAX) {
+		hid_err(hdev, "hid-msi-claw unknown gamepad mode: 0x%02x\n", buffer[5]);
+		ret = -EINVAL;
+		goto msi_claw_read_gamepad_mode_err;
+	} else if (buffer[6] >= MSI_CLAW_MKEY_FUNCTION_MAX) {
+		hid_err(hdev, "hid-msi-claw unknown gamepad mode: 0x%02x\n", buffer[6]);
+		ret = -EINVAL;
+		goto msi_claw_read_gamepad_mode_err;
 	}
+	
+	*mode = (enum msi_claw_gamepad_mode)buffer[5];
+	*mkeys = (enum msi_claw_mkeys_function)buffer[6];
 
-	// TODO: check for invalid mkeys or mode
-
-	// we have received the ack from the device: it is in the correct state
 	ret = 0;
 
 msi_claw_read_gamepad_mode_err:
