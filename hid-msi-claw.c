@@ -2,6 +2,7 @@
 #include <linux/hid.h>
 #include <linux/module.h>
 #include <linux/usb.h>
+#include <linux/mutex.h>
 
 //#include "hid-ids.h"
 
@@ -83,19 +84,29 @@ struct msi_claw_control_status {
 	enum msi_claw_mkeys_function mkeys_function;
 };
 
+struct msi_claw_read_data {
+	const uint8_t *data;
+	int size;
+
+	struct msi_claw_read_data* next;
+};
+
 struct msi_claw_drvdata {
 	struct hid_device *hdev;
-	struct input_dev *input;
-	struct input_dev *tp_kbd_input;
+
+	//struct input_dev *input;
 
 	struct msi_claw_control_status *control;
+
+	struct mutex read_data_mutex;
+	struct msi_claw_read_data* read_data;
 };
 
 static int msi_claw_write_cmd(struct hid_device *hdev, enum msi_claw_command_type cmdtype,
-    const u8 *const buffer, size_t buffer_len)
+    const uint8_t *const buffer, size_t buffer_len)
 {
 	int ret;
-	const u8 buf[MSI_CLAW_WRITE_SIZE] = {
+	const uint8_t buf[MSI_CLAW_WRITE_SIZE] = {
 		MSI_CLAW_FEATURE_GAMEPAD_REPORT_ID, 0, 0, 0x3c, cmdtype };
 	if (buffer != NULL) {
 		memcpy((void*)&buf[5], buffer, buffer_len);
@@ -104,7 +115,7 @@ static int msi_claw_write_cmd(struct hid_device *hdev, enum msi_claw_command_typ
 	}
 
 	memset((void*)&buf[5 + buffer_len], 0, MSI_CLAW_WRITE_SIZE - (5 + buffer_len));
-	u8 *const dmabuf = kmemdup(buf, MSI_CLAW_WRITE_SIZE, GFP_KERNEL);
+	uint8_t *const dmabuf = kmemdup(buf, MSI_CLAW_WRITE_SIZE, GFP_KERNEL);
 	if (!dmabuf) {
 		ret = -ENOMEM;
 		hid_err(hdev, "hid-msi-claw failed to alloc dma buf: %d\n", ret);
@@ -123,38 +134,104 @@ static int msi_claw_write_cmd(struct hid_device *hdev, enum msi_claw_command_typ
 	return 0;
 }
 
-static int msi_claw_read(struct hid_device *hdev, u8 *const buffer)
+static int msi_claw_read(struct hid_device *hdev, uint8_t *const buffer, int size, int timeout)
 {
-	int ret;
+	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
+	struct msi_claw_read_data *event = NULL;
+	int ret = 0;
 
-	unsigned char *dmabuf = kmemdup(buffer, MSI_CLAW_READ_SIZE, GFP_KERNEL);
-	if (!dmabuf) {
+	for (int i = 0; (event == NULL) && (i <= timeout); i++) {
+		msleep(1);
+		scoped_guard(mutex, &drvdata->read_data_mutex) {
+			event = drvdata->read_data;
+
+			if (event != NULL) {
+				drvdata->read_data = event->next;
+				event->next = NULL;
+			}
+		}
+	}
+
+	if (event == NULL) {
+		ret = -EIO;
+		hid_err(hdev, "hid-msi-claw no answer from device\n");
+		goto msi_claw_read_err;
+	} else {
+		hid_notice(hdev, "hid-msi-claw command 0x%02x\n", event->data[4]);
+	}
+
+	if (size < event->size) {
+		ret = -EINVAL;
+		hid_err(hdev, "hid-msi-claw invalid buffer size: too short\n");
+		goto msi_claw_read_err;
+	}
+
+	memcpy((void*)buffer, (const void*)event->data, event->size);
+
+	kfree((void*)event->data);
+	kfree((void*)event);
+
+msi_claw_read_err:
+	return ret;
+}
+
+static int msi_claw_raw_event(struct hid_device *hdev, struct hid_report *report, uint8_t *data, int size)
+{
+	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
+	int ret = 0;
+
+	if (size != MSI_CLAW_READ_SIZE) {
+		hid_err(hdev, "hid-msi-claw got unknown %d bytes\n", size);
+		goto msi_claw_unknown_raw_event;
+	} else if (data[0] != 0x10) {
+		hid_err(hdev, "hid-msi-claw unrecognised byte at offset 0: expected 0x10, got 0x%02x\n", data[0]);
+		goto msi_claw_unknown_raw_event;
+	} else if (data[1] != 0x00) {
+		hid_err(hdev, "hid-msi-claw unrecognised byte at offset 1: expected 0x00, got 0x%02x\n", data[1]);
+		goto msi_claw_unknown_raw_event;
+	} else if (data[2] != 0x00) {
+		hid_err(hdev, "hid-msi-claw unrecognised byte at offset 2: expected 0x00, got 0x%02x\n", data[2]);
+		goto msi_claw_unknown_raw_event;
+	} else if (data[3] != 0x3c) {
+		hid_err(hdev, "hid-msi-claw unrecognised byte at offset 3: expected 0x3c, got 0x%02x\n", data[3]);
+		goto msi_claw_unknown_raw_event;
+	}
+
+	unsigned char *const buffer = (unsigned char *)kmemdup(data, size, GFP_KERNEL);
+	if (!buffer) {
 		ret = -ENOMEM;
-		hid_err(hdev, "hid-msi-claw failed to alloc dma buf: %d\n", ret);
+		hid_err(hdev, "hid-msi-claw failed to alloc %d bytes for read buffer: %d\n", size, ret);
 		return ret;
 	}
 
-	// either HID_FEATURE_REPORT or HID_INPUT_REPORT
-	ret = hid_hw_raw_request(hdev, 0x10, dmabuf, MSI_CLAW_READ_SIZE, HID_FEATURE_REPORT, HID_REQ_GET_REPORT);
-	//ret = hid_input_report(hdev, HID_INPUT_REPORT, dmabuf, MSI_CLAW_READ_SIZE, 0)
-	//ret = hid_input_report(hdev, HID_FEATURE_REPORT, dmabuf, MSI_CLAW_READ_SIZE, 0)
-	if (ret >= 8) {
-		hid_err(hdev, "hid-msi-claw read %d bytes: %02x %02x %02x %02x %02x %02x %02x %02x \n", ret,
-			dmabuf[0], dmabuf[1], dmabuf[2], dmabuf[3], dmabuf[4], dmabuf[5], dmabuf[6], dmabuf[7]);
-		memcpy((void*)buffer, dmabuf, MSI_CLAW_READ_SIZE);
-		ret = 0;
-	} else if (ret < 0) {
-		hid_err(hdev, "hid-msi-claw failed to read: %d\n", ret);
-		goto msi_claw_read_err;
-	} else {
-		hid_err(hdev, "hid-msi-claw read %d bytes\n", ret);
-		ret = -EINVAL;
-		goto msi_claw_read_err;
+	struct msi_claw_read_data evt = {
+		.data = buffer,
+		.size = size,
+		.next = NULL,
+	};
+	struct msi_claw_read_data *const node = (struct msi_claw_read_data*)kmemdup(&evt, sizeof(evt), GFP_KERNEL);
+	if (!node) {
+		ret = -ENOMEM;
+		kfree(buffer);
+		hid_err(hdev, "hid-msi-claw failed to alloc event node: %d\n", ret);
+		return ret;
 	}
 
-msi_claw_read_err:
-	kfree(dmabuf);
+	scoped_guard(mutex, &drvdata->read_data_mutex) {
+		struct msi_claw_read_data **list = &drvdata->read_data;
+		for (int i = 0; (i < 1025) && (*list != NULL); i++) {
+			list = &(*list)->next;
+		}
 
+		if (*list == NULL) {
+			*list = node;
+			hid_notice(hdev, "hid-msi-claw received %d bytes, cmd: 0x%02x\n", size, buffer[4]);
+		} else {
+			hid_err(hdev, "too many unparsed events: ignoring\n");
+		}
+	}
+
+msi_claw_unknown_raw_event:
 	return ret;
 }
 
@@ -181,8 +258,8 @@ static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_g
 	enum msi_claw_mkeys_function mkeys)
 {
 	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
-	u8 buffer[MSI_CLAW_READ_SIZE] = {};
-	const u8 cmd_buffer[2] = {(u8)mode, (u8)mkeys};
+	uint8_t buffer[MSI_CLAW_READ_SIZE] = {};
+	const uint8_t cmd_buffer[2] = {(uint8_t)mode, (uint8_t)mkeys};
 
 	int ret;
 
@@ -199,6 +276,15 @@ static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_g
 		return ret;
 	}
 
+	// await an ack?
+	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 60);
+	if (ret) {
+		hid_err(hdev, "hid-msi-claw failed to read: %d\n", ret);
+		// return ret;
+	} else if (buffer[4] == 0x06) {
+		hid_err(hdev, "hid-msi-claw got ACK!!!\n");
+	}
+
 	// 0f00003c260000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 	ret = msi_claw_write_cmd(hdev, MSI_CLAW_COMMAND_TYPE_READ_GAMEPAD_MODE, cmd_buffer, sizeof(cmd_buffer));
 	if (ret) {
@@ -206,24 +292,24 @@ static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_g
 		return ret;
 	}
 
-	msleep(4);
-
 	// here goes the actual read call and the check.
 	// an example response is: 1000003c270100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 	// wireshark shows 64 bytes, but it does so for host->device too and we know 8 bytes are to be sent.
-	ret = msi_claw_read(hdev, buffer);
+	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 60);
 	if (ret) {
 		hid_err(hdev, "hid-msi-claw failed to read: %d\n", ret);
 		// return ret;
+	} else if (buffer[4] == 0x06) {
+		hid_err(hdev, "hid-msi-claw got ACK!!!\n");
 	}
 	// TODO: uncomment the return above and this else
 	else {
 		if (buffer[0] != 0x10) {
 			hid_err(hdev, "hid-msi-claw unexpected destination in readback buffer\n");
 			//return -EINVAL;
-		} else if (buffer[3] != (u8)0x3c) {
+		} else if (buffer[3] != (uint8_t)0x3c) {
 			hid_err(hdev, "hid-msi-claw not the correct data.\n");
-		} else if (buffer[4] != (u8)MSI_CLAW_COMMAND_TYPE_GAMEPAD_MODE_ACK) {
+		} else if (buffer[4] != (uint8_t)MSI_CLAW_COMMAND_TYPE_GAMEPAD_MODE_ACK) {
 			hid_err(hdev, "hid-msi-claw not command type ACK.\n");
 		}
 		
@@ -309,7 +395,7 @@ static ssize_t gamepad_mode_current_store(struct device *dev, struct device_attr
 
 	if (new_gamepad_mode == ARRAY_SIZE(gamepad_mode_map)) {
 		hid_err(hdev, "Invalid gamepad mode selected\n");
-		ret= -EINVAL;
+		ret = -EINVAL;
 		goto gamepad_mode_current_store_err;
 	}
 
@@ -399,21 +485,6 @@ mkeys_function_current_store_err:
 }
 static DEVICE_ATTR_RW(mkeys_function_current);
 
-static ssize_t debug_read_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	struct hid_device *hdev = to_hid_device(dev);
-	u8 buffer[MSI_CLAW_READ_SIZE] = {};
-
-	const int res = msi_claw_read(hdev, buffer);
-
-	return sysfs_emit(buf, "%d -> %02x%02x%02x%02x%02x%02x%02x%02x\n",
-		res,
-		buffer[0], buffer[1], buffer[2], buffer[3],
-		buffer[4], buffer[5], buffer[6], buffer[7]
-	);
-}
-static DEVICE_ATTR_RO(debug_read);
-
 static int msi_claw_probe(struct hid_device *hdev, const struct hid_device_id *id)
 {
 	int ret;
@@ -430,6 +501,8 @@ static int msi_claw_probe(struct hid_device *hdev, const struct hid_device_id *i
 		return -ENOMEM;
 	}
 
+	mutex_init(&drvdata->read_data_mutex);
+	drvdata->read_data = NULL;
 	drvdata->control = NULL;
 
 	hid_set_drvdata(hdev, drvdata);
@@ -465,12 +538,6 @@ static int msi_claw_probe(struct hid_device *hdev, const struct hid_device_id *i
 		drvdata->control->gamepad_mode = MSI_CLAW_GAMEPAD_MODE_XINPUT;
 		drvdata->control->mkeys_function = MSI_CLAW_MKEY_FUNCTION_MACRO;
 
-		ret = msi_claw_switch_gamepad_mode(hdev, drvdata->control->gamepad_mode, drvdata->control->mkeys_function);
-		if (ret != 0) {
-			hid_err(hdev, "hid-msi-claw failed to initialize controller mode: %d\n", ret);
-			goto err_close;
-		}
-
 		ret = sysfs_create_file(&hdev->dev.kobj, &dev_attr_gamepad_mode_available.attr);
 		if (ret) {
 			hid_err(hdev, "hid-msi-claw failed to sysfs_create_file dev_attr_gamepad_mode_available: %d\n", ret);
@@ -480,29 +547,32 @@ static int msi_claw_probe(struct hid_device *hdev, const struct hid_device_id *i
 		ret = sysfs_create_file(&hdev->dev.kobj, &dev_attr_gamepad_mode_current.attr);
 		if (ret) {
 			hid_err(hdev, "hid-msi-claw failed to sysfs_create_file dev_attr_gamepad_mode_current: %d\n", ret);
-			goto err_close;
+			goto err_dev_attr_gamepad_mode_current;
 		}
 
 		ret = sysfs_create_file(&hdev->dev.kobj, &dev_attr_mkeys_function_available.attr);
 		if (ret) {
 			hid_err(hdev, "hid-msi-claw failed to sysfs_create_file dev_attr_mkeys_function_available: %d\n", ret);
-			goto err_close;
+			goto err_dev_attr_mkeys_function_available;
 		}
 
 		ret = sysfs_create_file(&hdev->dev.kobj, &dev_attr_mkeys_function_current.attr);
 		if (ret) {
 			hid_err(hdev, "hid-msi-claw failed to sysfs_create_file dev_attr_mkeys_function_current: %d\n", ret);
-			goto err_close;
-		}
-
-		ret = sysfs_create_file(&hdev->dev.kobj, &dev_attr_debug_read.attr);
-		if (ret) {
-			hid_err(hdev, "hid-msi-claw failed to sysfs_create_file dev_attr_debug_read: %d\n", ret);
-			goto err_close;
+			goto err_dev_attr_mkeys_function_current;
 		}
 	}
 
 	return 0;
+
+err_dev_attr_gamepad_mode_current:
+	sysfs_remove_file(&hdev->dev.kobj, &dev_attr_gamepad_mode_available.attr);
+
+err_dev_attr_mkeys_function_available:
+	sysfs_remove_file(&hdev->dev.kobj, &dev_attr_gamepad_mode_current.attr);
+
+err_dev_attr_mkeys_function_current:
+	sysfs_remove_file(&hdev->dev.kobj, &dev_attr_mkeys_function_available.attr);
 
 err_close:
 	hid_hw_close(hdev);
@@ -550,6 +620,7 @@ MODULE_DEVICE_TABLE(hid, msi_claw_devices);
 static struct hid_driver msi_claw_driver = {
 	.name			= "hid-msi-claw",
 	.id_table		= msi_claw_devices,
+	.raw_event		= msi_claw_raw_event,
 	.probe			= msi_claw_probe,
 	.remove			= msi_claw_remove,
 	.resume			= msi_claw_resume,
