@@ -164,6 +164,7 @@ static int msi_claw_read(struct hid_device *hdev, uint8_t *const buffer, int siz
 	}
 
 	memcpy((void*)buffer, (const void*)event->data, event->size);
+	ret = event->size;
 
 msi_claw_read_err:
 	if (event != NULL) {
@@ -235,6 +236,7 @@ msi_claw_unknown_raw_event:
 	return ret;
 }
 
+/*
 static int sync_to_rom(struct hid_device *hdev) {
 	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
 	int ret;
@@ -253,93 +255,97 @@ static int sync_to_rom(struct hid_device *hdev) {
 
 	return ret;
 }
+*/
+
+static int msi_claw_read_gamepad_mode(struct hid_device *hdev,
+	enum msi_claw_gamepad_mode *mode, enum msi_claw_mkeys_function *mkeys)
+{
+	uint8_t buffer[MSI_CLAW_READ_SIZE] = {};
+	int ret;
+
+	ret = msi_claw_write_cmd(hdev, MSI_CLAW_COMMAND_TYPE_READ_GAMEPAD_MODE, NULL, 0);
+	if (ret) {
+		hid_err(hdev, "hid-msi-claw failed to send read request for controller mode: %d\n", ret);
+		goto msi_claw_read_gamepad_mode_err;
+	}
+
+	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 60);
+	if (ret != MSI_CLAW_READ_SIZE) {
+		hid_err(hdev, "hid-msi-claw failed to read: %d\n", ret);
+		ret = -EINVAL;
+		goto msi_claw_read_gamepad_mode_err;
+	}
+	
+	if (buffer[4] != (uint8_t)MSI_CLAW_COMMAND_TYPE_ACK) {
+		hid_err(hdev, "hid-msi-claw received invalid response: expected 0x06, got 0x%02x\n", buffer[4]);
+		ret = -EINVAL;
+		goto msi_claw_read_gamepad_mode_err;
+	}
+
+	// TODO: check for invalid mkeys or mode
+
+	// we have received the ack from the device: it is in the correct state
+	ret = 0;
+
+msi_claw_read_gamepad_mode_err:
+	return ret;
+}
 
 static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_gamepad_mode mode,
 	enum msi_claw_mkeys_function mkeys)
 {
 	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
+	enum msi_claw_gamepad_mode check_mode;
+	enum msi_claw_mkeys_function check_mkeys;
 	uint8_t buffer[MSI_CLAW_READ_SIZE] = {};
 	const uint8_t cmd_buffer[2] = {(uint8_t)mode, (uint8_t)mkeys};
-
 	int ret;
 
 	if (!drvdata->control) {
 		hid_err(hdev, "hid-msi-claw couldn't find control interface\n");
 		ret = -ENODEV;
-		return ret;
+		goto msi_claw_switch_gamepad_mode_err;
 	}
 
-	// 0f00003c240100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 	ret = msi_claw_write_cmd(hdev, MSI_CLAW_COMMAND_TYPE_SWITCH_MODE, cmd_buffer, sizeof(cmd_buffer));
 	if (ret) {
 		hid_err(hdev, "hid-msi-claw failed to send write request for switch controller mode: %d\n", ret);
-		return ret;
+		goto msi_claw_switch_gamepad_mode_err;
 	}
 
 	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 60);
-	if (ret) {
+	if (ret < 0) {
 		hid_err(hdev, "hid-msi-claw failed to read: %d\n", ret);
-		return ret;
+		goto msi_claw_switch_gamepad_mode_err;
 	}
-	
+
 	if (buffer[4] != (uint8_t)MSI_CLAW_COMMAND_TYPE_ACK) {
 		hid_err(hdev, "hid-msi-claw received invalid response: expected 0x06, got 0x%02x\n", buffer[4]);
-		return -EINVAL;
-	}
-
-	// 0f00003c260000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-	ret = msi_claw_write_cmd(hdev, MSI_CLAW_COMMAND_TYPE_READ_GAMEPAD_MODE, cmd_buffer, sizeof(cmd_buffer));
-	if (ret) {
-		hid_err(hdev, "hid-msi-claw failed to send read request for controller mode: %d\n", ret);
-		return ret;
-	}
-
-	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 60);
-	if (ret) {
-		hid_err(hdev, "hid-msi-claw failed to read: %d\n", ret);
-		return ret;
-	}
-	
-	if (buffer[4] != (uint8_t)MSI_CLAW_COMMAND_TYPE_ACK) {
-		hid_err(hdev, "hid-msi-claw received invalid response: expected 0x06, got 0x%02x\n", buffer[4]);
-		return -EINVAL;
-	}
-
-	// here goes the actual read call and the check.
-	// an example response is: 1000003c270100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-	// wireshark shows 64 bytes, but it does so for host->device too and we know 8 bytes are to be sent.
-	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 60);
-	if (ret) {
-		hid_err(hdev, "hid-msi-claw failed to read: %d\n", ret);
-		return ret;
-	}
-	
-	if (buffer[4] != (uint8_t)MSI_CLAW_COMMAND_TYPE_GAMEPAD_MODE_ACK) {
-		hid_err(hdev, "hid-msi-claw received unexpected response\n");
 		ret = -EINVAL;
-		return ret;
+		goto msi_claw_switch_gamepad_mode_err;
 	}
 
-	if (memcmp(cmd_buffer, &buffer[5], sizeof(cmd_buffer)) != 0) {
-		hid_err(hdev, "hid-msi-claw not in requested state\n");
-		ret = -EBUSY;
-		return ret;
+	// ensure the gamepad is in the new mode 
+	ret = msi_claw_read_gamepad_mode(hdev, &check_mode, &check_mkeys);
+	if (ret) {
+		hid_err(hdev, "hid-msi-claw failed to fetch mode: %d\n", ret);
+		goto msi_claw_switch_gamepad_mode_err;
 	}
 
-	// we have received the ack from the device: it is in the correct state
-	drvdata->control->gamepad_mode = mode;
-	drvdata->control->mkeys_function = mkeys;
 
 	// the device now sends back 03 00 00 00 00 00 00 00 00
 	
 	// this command is always issued by the windows counterpart after a mode switch
+	/*
 	ret = sync_to_rom(hdev);
 	if (ret) {
 		hid_err(hdev, "hid-msi-claw failed the sync to rom command: %d\n", ret);
 		return ret;
 	}
+	*/
 
-	return 0;
+msi_claw_switch_gamepad_mode_err:
+	return ret;
 }
 
 static ssize_t gamepad_mode_available_show(struct device *dev, struct device_attribute *attr, char *buf)
@@ -366,9 +372,15 @@ static DEVICE_ATTR_RO(gamepad_mode_available);
 static ssize_t gamepad_mode_current_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct hid_device *hdev = to_hid_device(dev);
-	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
+	enum msi_claw_gamepad_mode mode;
+	enum msi_claw_mkeys_function mkeys;
+	int ret = msi_claw_read_gamepad_mode(hdev, &mode, &mkeys);
+	if (ret) {
+		hid_err(hdev, "hid-msi-claw error reaging the gamepad mode: %d\n", ret);
+		return ret;
+	}
 
-	return sysfs_emit(buf, "%s\n", gamepad_mode_map[drvdata->control->gamepad_mode].name);
+	return sysfs_emit(buf, "%s\n", gamepad_mode_map[(int)mode].name);
 }
 
 static ssize_t gamepad_mode_current_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
