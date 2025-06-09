@@ -219,7 +219,7 @@ static int msi_claw_raw_event(struct hid_device *hdev, struct hid_report *report
 
 	scoped_guard(mutex, &drvdata->read_data_mutex) {
 		struct msi_claw_read_data **list = &drvdata->read_data;
-		for (int i = 0; (i < 1025) && (*list != NULL); i++) {
+		for (int i = 0; (i < 32) && (*list != NULL); i++) {
 			list = &(*list)->next;
 		}
 
@@ -227,6 +227,7 @@ static int msi_claw_raw_event(struct hid_device *hdev, struct hid_report *report
 			*list = node;
 			hid_notice(hdev, "hid-msi-claw received %d bytes, cmd: 0x%02x\n", size, buffer[4]);
 		} else {
+			ret = -EIO;
 			hid_err(hdev, "too many unparsed events: ignoring\n");
 		}
 	}
@@ -276,13 +277,14 @@ static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_g
 		return ret;
 	}
 
-	// await an ack?
 	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 60);
 	if (ret) {
 		hid_err(hdev, "hid-msi-claw failed to read: %d\n", ret);
-		// return ret;
-	} else if (buffer[4] == 0x06) {
-		hid_err(hdev, "hid-msi-claw got ACK!!!\n");
+		return ret;
+	}
+	
+	if (buffer[4] != (uint8_t)MSI_CLAW_COMMAND_TYPE_ACK) {
+		hid_err(hdev, "hid-msi-claw received invalid response: expected 0x06, got 0x%02x\n", buffer[4]);
 	}
 
 	// 0f00003c260000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -298,25 +300,19 @@ static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_g
 	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 60);
 	if (ret) {
 		hid_err(hdev, "hid-msi-claw failed to read: %d\n", ret);
-		// return ret;
-	} else if (buffer[4] == 0x06) {
-		hid_err(hdev, "hid-msi-claw got ACK!!!\n");
+		return ret;
 	}
-	// TODO: uncomment the return above and this else
-	else {
-		if (buffer[0] != 0x10) {
-			hid_err(hdev, "hid-msi-claw unexpected destination in readback buffer\n");
-			//return -EINVAL;
-		} else if (buffer[3] != (uint8_t)0x3c) {
-			hid_err(hdev, "hid-msi-claw not the correct data.\n");
-		} else if (buffer[4] != (uint8_t)MSI_CLAW_COMMAND_TYPE_GAMEPAD_MODE_ACK) {
-			hid_err(hdev, "hid-msi-claw not command type ACK.\n");
-		}
-		
-		ret = memcmp(cmd_buffer, &buffer[5], sizeof(cmd_buffer));
-		if (ret) {
-			hid_err(hdev, "hid-msi-claw not in desired state.\n");
-		}
+	
+	if (buffer[4] != (uint8_t)MSI_CLAW_COMMAND_TYPE_GAMEPAD_MODE_ACK) {
+		hid_err(hdev, "hid-msi-claw received unexpected response\n");
+		ret = -EINVAL;
+		return ret;
+	}
+
+	if (memcmp(cmd_buffer, &buffer[5], sizeof(cmd_buffer)) != 0) {
+		hid_err(hdev, "hid-msi-claw not in requested state\n");
+		ret = -EBUSY;
+		return ret;
 	}
 
 	// we have received the ack from the device: it is in the correct state
@@ -435,7 +431,14 @@ static ssize_t mkeys_function_current_show(struct device *dev, struct device_att
 	struct hid_device *hdev = to_hid_device(dev);
 	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
 
-	return sysfs_emit(buf, "%s\n", mkeys_function_map[drvdata->control->mkeys_function]);
+	int mkeys_function = drvdata->control->mkeys_function;
+
+	if (mkeys_function > ARRAY_SIZE(mkeys_function_map)) {
+		hid_err(hdev, "hid-msi-claw unrecognised mkeys function: %d\n", mkeys_function);
+		return -EINVAL;
+	}
+
+	return sysfs_emit(buf, "%s\n", mkeys_function_map[mkeys_function]);
 }
 
 static ssize_t mkeys_function_current_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
@@ -628,3 +631,5 @@ static struct hid_driver msi_claw_driver = {
 module_hid_driver(msi_claw_driver);
 
 MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Denis Benato <benato.denis96@gmail.com>");
+MODULE_DESCRIPTION("Manage MSI Claw gamepad device");
