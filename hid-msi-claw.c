@@ -393,7 +393,6 @@ static ssize_t gamepad_mode_current_show(struct device *dev, struct device_attri
 static ssize_t gamepad_mode_current_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct hid_device *hdev = to_hid_device(dev);
-	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
 	struct msi_claw_control_status status;
 	enum msi_claw_gamepad_mode new_gamepad_mode = ARRAY_SIZE(gamepad_mode_map);
 	ssize_t ret;
@@ -481,7 +480,6 @@ static ssize_t mkeys_function_current_show(struct device *dev, struct device_att
 static ssize_t mkeys_function_current_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct hid_device *hdev = to_hid_device(dev);
-	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
 	struct msi_claw_control_status status;
 	enum msi_claw_mkeys_function new_mkeys_function = ARRAY_SIZE(mkeys_function_map);
 
