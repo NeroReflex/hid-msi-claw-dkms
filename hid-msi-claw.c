@@ -303,13 +303,12 @@ msi_claw_read_gamepad_mode_err:
 	return ret;
 }
 
-static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_gamepad_mode mode,
-	enum msi_claw_mkeys_function mkeys)
+static int msi_claw_switch_gamepad_mode(struct hid_device *hdev,
+	const struct msi_claw_control_status *status)
 {
 	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
-	struct msi_claw_control_status new_status;
 	uint8_t buffer[MSI_CLAW_READ_SIZE] = {};
-	const uint8_t cmd_buffer[2] = {(uint8_t)mode, (uint8_t)mkeys};
+	const uint8_t cmd_buffer[2] = {(uint8_t)status->gamepad_mode, (uint8_t)status->mkeys_function};
 	int ret;
 
 	if (!drvdata->control) {
@@ -328,6 +327,10 @@ static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_g
 	if (ret < 0) {
 		hid_err(hdev, "hid-msi-claw failed to read: %d\n", ret);
 		goto msi_claw_switch_gamepad_mode_err;
+	} else if (ret != MSI_CLAW_READ_SIZE) {
+		hid_err(hdev, "hid-msi-claw invalid read: expected %d bytes, got %d\n", MSI_CLAW_READ_SIZE, ret);
+		ret = -EINVAL;
+		goto msi_claw_switch_gamepad_mode_err;
 	}
 
 	if (buffer[4] != (uint8_t)MSI_CLAW_COMMAND_TYPE_ACK) {
@@ -336,18 +339,7 @@ static int msi_claw_switch_gamepad_mode(struct hid_device *hdev, enum msi_claw_g
 		goto msi_claw_switch_gamepad_mode_err;
 	}
 
-	// ensure the gamepad is in the new mode 
-	ret = msi_claw_read_gamepad_mode(hdev, &new_status);
-	if (ret) {
-		hid_err(hdev, "hid-msi-claw failed to fetch mode: %d\n", ret);
-		goto msi_claw_switch_gamepad_mode_err;
-	}
-
-	if (new_status.gamepad_mode != mode) {
-
-	} else if (new_status.mkeys_function != mkeys) {
-
-	}
+	ret = 0;
 
 	// the device now sends back 03 00 00 00 00 00 00 00 00
 	
@@ -402,7 +394,7 @@ static ssize_t gamepad_mode_current_store(struct device *dev, struct device_attr
 {
 	struct hid_device *hdev = to_hid_device(dev);
 	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
-
+	struct msi_claw_control_status status;
 	enum msi_claw_gamepad_mode new_gamepad_mode = ARRAY_SIZE(gamepad_mode_map);
 	ssize_t ret;
 
@@ -433,10 +425,19 @@ static ssize_t gamepad_mode_current_store(struct device *dev, struct device_attr
 		goto gamepad_mode_current_store_err;
 	}
 
-	ret = msi_claw_switch_gamepad_mode(hdev, new_gamepad_mode, drvdata->control->mkeys_function);
-	if (ret < 0) {
-		hid_err(hdev, "Error changing gamepad mode: %d\n", (int)ret);
+	ret = msi_claw_read_gamepad_mode(hdev, &status);
+	if (ret) {
+		hid_err(hdev, "Error reading gamepad status: %d\n", (int)ret);
 		goto gamepad_mode_current_store_err;
+	}
+
+	if (status.gamepad_mode != new_gamepad_mode) {
+		status.gamepad_mode = new_gamepad_mode;
+		ret = msi_claw_switch_gamepad_mode(hdev, &status);
+		if (ret) {
+			hid_err(hdev, "Error changing gamepad mode: %d\n", (int)ret);
+			goto gamepad_mode_current_store_err;
+		}
 	}
 
 	ret = count;
@@ -481,7 +482,7 @@ static ssize_t mkeys_function_current_store(struct device *dev, struct device_at
 {
 	struct hid_device *hdev = to_hid_device(dev);
 	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
-
+	struct msi_claw_control_status status;
 	enum msi_claw_mkeys_function new_mkeys_function = ARRAY_SIZE(mkeys_function_map);
 
 	ssize_t ret;
@@ -511,10 +512,19 @@ static ssize_t mkeys_function_current_store(struct device *dev, struct device_at
 		goto mkeys_function_current_store_err;
 	}
 
-	ret = msi_claw_switch_gamepad_mode(hdev, drvdata->control->gamepad_mode, new_mkeys_function);
-	if (ret < 0) {
-		hid_err(hdev, "Error changing mkeys function: %d\n", (int)ret);
+	ret = msi_claw_read_gamepad_mode(hdev, &status);
+	if (ret) {
+		hid_err(hdev, "Error reading gamepad status: %d\n", (int)ret);
 		goto mkeys_function_current_store_err;
+	}
+
+	if (status.mkeys_function != new_mkeys_function) {
+		status.mkeys_function = new_mkeys_function;
+		ret = msi_claw_switch_gamepad_mode(hdev, &status);
+		if (ret) {
+			hid_err(hdev, "Error changing mkeys function: %d\n", (int)ret);
+			goto mkeys_function_current_store_err;
+		}
 	}
 
 	ret = count;
@@ -644,7 +654,7 @@ static int msi_claw_resume(struct hid_device *hdev) {
 		// the hardware needs some time to re-initialize
 		ssleep(3);
 
-		ret = msi_claw_switch_gamepad_mode(hdev, drvdata->control->gamepad_mode, drvdata->control->mkeys_function);
+		ret = msi_claw_switch_gamepad_mode(hdev, drvdata->control);
 		if (ret) {
 			hid_err(hdev, "hid-msi-claw failed to resume gamepad to previous status: %d\n", ret);
 			goto msi_claw_resume_err;
