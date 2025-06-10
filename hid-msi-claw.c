@@ -288,8 +288,12 @@ static int msi_claw_read_gamepad_mode(struct hid_device *hdev,
 	int ret;
 
 	ret = msi_claw_write_cmd(hdev, MSI_CLAW_COMMAND_TYPE_READ_GAMEPAD_MODE, NULL, 0);
-	if (ret) {
+	if (ret < 0) {
 		hid_err(hdev, "hid-msi-claw failed to send read request for controller mode: %d\n", ret);
+		goto msi_claw_read_gamepad_mode_err;
+	} else if (ret != MSI_CLAW_WRITE_SIZE) {
+		hid_err(hdev, "hid-msi-claw couldn't send request: %d\n", ret);
+		ret = -EIO;
 		goto msi_claw_read_gamepad_mode_err;
 	}
 
