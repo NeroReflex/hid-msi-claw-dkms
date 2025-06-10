@@ -188,7 +188,7 @@ static int msi_claw_raw_event(struct hid_device *hdev, struct hid_report *report
 	int ret = 0;
 
 	if (size != MSI_CLAW_READ_SIZE) {
-		hid_err(hdev, "hid-msi-claw got unknown %d bytes\n", size);
+		//hid_err(hdev, "hid-msi-claw got unknown %d bytes\n", size);
 		goto msi_claw_unknown_raw_event;
 	} else if (data[0] != 0x10) {
 		hid_err(hdev, "hid-msi-claw unrecognised byte at offset 0: expected 0x10, got 0x%02x\n", data[0]);
