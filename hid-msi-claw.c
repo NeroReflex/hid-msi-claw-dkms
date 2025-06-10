@@ -433,8 +433,12 @@ static ssize_t gamepad_mode_current_show(struct device *dev, struct device_attri
 static ssize_t gamepad_mode_current_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct hid_device *hdev = to_hid_device(dev);
-	struct msi_claw_control_status status;
+	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
 	enum msi_claw_gamepad_mode new_gamepad_mode = ARRAY_SIZE(gamepad_mode_map);
+	struct msi_claw_control_status status = {
+		.gamepad_mode = drvdata->control->gamepad_mode,
+		.mkeys_function = drvdata->control->mkeys_function,
+	};
 	ssize_t ret;
 
 	if (!count) {
@@ -464,19 +468,11 @@ static ssize_t gamepad_mode_current_store(struct device *dev, struct device_attr
 		goto gamepad_mode_current_store_err;
 	}
 
-	ret = msi_claw_read_gamepad_mode(hdev, &status);
+	status.gamepad_mode = new_gamepad_mode;
+	ret = msi_claw_switch_gamepad_mode(hdev, &status);
 	if (ret) {
-		hid_err(hdev, "Error reading gamepad status: %d\n", (int)ret);
+		hid_err(hdev, "Error changing gamepad mode: %d\n", (int)ret);
 		goto gamepad_mode_current_store_err;
-	}
-
-	if (status.gamepad_mode != new_gamepad_mode) {
-		status.gamepad_mode = new_gamepad_mode;
-		ret = msi_claw_switch_gamepad_mode(hdev, &status);
-		if (ret) {
-			hid_err(hdev, "Error changing gamepad mode: %d\n", (int)ret);
-			goto gamepad_mode_current_store_err;
-		}
 	}
 
 	ret = count;
@@ -520,8 +516,12 @@ static ssize_t mkeys_function_current_show(struct device *dev, struct device_att
 static ssize_t mkeys_function_current_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct hid_device *hdev = to_hid_device(dev);
-	struct msi_claw_control_status status;
+	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
 	enum msi_claw_mkeys_function new_mkeys_function = ARRAY_SIZE(mkeys_function_map);
+	struct msi_claw_control_status status = {
+		.gamepad_mode = drvdata->control->gamepad_mode,
+		.mkeys_function = drvdata->control->mkeys_function,
+	};
 
 	ssize_t ret;
 
@@ -550,19 +550,11 @@ static ssize_t mkeys_function_current_store(struct device *dev, struct device_at
 		goto mkeys_function_current_store_err;
 	}
 
-	ret = msi_claw_read_gamepad_mode(hdev, &status);
+	status.mkeys_function = new_mkeys_function;
+	ret = msi_claw_switch_gamepad_mode(hdev, &status);
 	if (ret) {
-		hid_err(hdev, "Error reading gamepad status: %d\n", (int)ret);
+		hid_err(hdev, "Error changing mkeys function: %d\n", (int)ret);
 		goto mkeys_function_current_store_err;
-	}
-
-	if (status.mkeys_function != new_mkeys_function) {
-		status.mkeys_function = new_mkeys_function;
-		ret = msi_claw_switch_gamepad_mode(hdev, &status);
-		if (ret) {
-			hid_err(hdev, "Error changing mkeys function: %d\n", (int)ret);
-			goto mkeys_function_current_store_err;
-		}
 	}
 
 	ret = count;
@@ -682,6 +674,7 @@ static void msi_claw_remove(struct hid_device *hdev)
 		sysfs_remove_file(&hdev->dev.kobj, &dev_attr_gamepad_mode_current.attr);
 		sysfs_remove_file(&hdev->dev.kobj, &dev_attr_mkeys_function_available.attr);
 		sysfs_remove_file(&hdev->dev.kobj, &dev_attr_mkeys_function_current.attr);
+		sysfs_remove_file(&hdev->dev.kobj, &dev_attr_reset.attr);
 	}
 
 	hid_hw_close(hdev);
