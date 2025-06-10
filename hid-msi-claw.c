@@ -123,19 +123,22 @@ static int msi_claw_write_cmd(struct hid_device *hdev, enum msi_claw_command_typ
 	if (!dmabuf) {
 		ret = -ENOMEM;
 		hid_err(hdev, "hid-msi-claw failed to alloc dma buf: %d\n", ret);
-		return ret;
+		goto msi_claw_write_cmd_err;
 	}
 
 	ret = hid_hw_output_report(hdev, dmabuf, MSI_CLAW_WRITE_SIZE);
-
-	kfree(dmabuf);
-
 	if (ret != MSI_CLAW_WRITE_SIZE) {
 		hid_err(hdev, "hid-msi-claw failed to switch controller mode: %d\n", ret);
-		return ret;
+		goto msi_claw_write_cmd_err;
 	}
 
-	return 0;
+	hid_notice(hdev, "hid-msi-claw sent %d bytes, cmd: 0x%02x\n", ret, dmabuf[4]);
+
+msi_claw_write_cmd_err:
+	if (dmabuf)
+		kfree(dmabuf);
+
+	return ret;
 }
 
 static int msi_claw_read(struct hid_device *hdev, uint8_t *const buffer, int size, int timeout)
@@ -261,6 +264,25 @@ static int sync_to_rom(struct hid_device *hdev) {
 }
 */
 
+static int msi_claw_reset_device(struct hid_device *hdev) {
+	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
+	int ret;
+
+	if (!drvdata->control) {
+		hid_err(hdev, "hid-msi-claw couldn't find control interface\n");
+		ret = -ENODEV;
+		return ret;
+	}
+
+	ret = msi_claw_write_cmd(hdev, MSI_CLAW_COMMAND_TYPE_RESET_DEVICE, NULL, 0);
+	if (ret) {
+		hid_err(hdev, "hid-msi-claw failed to send write request to reset controller: %d\n", ret);
+		return ret;
+	}
+
+	return ret;
+}
+
 static int msi_claw_read_gamepad_mode(struct hid_device *hdev,
 	struct msi_claw_control_status *status)
 {
@@ -355,6 +377,24 @@ static int msi_claw_switch_gamepad_mode(struct hid_device *hdev,
 msi_claw_switch_gamepad_mode_err:
 	return ret;
 }
+
+static ssize_t reset_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct hid_device *hdev = to_hid_device(dev);
+	int ret;
+
+	ret = msi_claw_reset_device(hdev);
+	if (ret) {
+		hid_err(hdev, "hid-msi-claw error resetting device: %d\n", ret);
+		goto reset_store_err;
+	}
+
+	return count;
+
+reset_store_err:
+	return ret;
+}
+static DEVICE_ATTR_WO(reset);
 
 static ssize_t gamepad_mode_available_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -608,19 +648,24 @@ static int msi_claw_probe(struct hid_device *hdev, const struct hid_device_id *i
 			hid_err(hdev, "hid-msi-claw failed to sysfs_create_file dev_attr_mkeys_function_current: %d\n", ret);
 			goto err_dev_attr_mkeys_function_current;
 		}
+
+		ret = sysfs_create_file(&hdev->dev.kobj, &dev_attr_reset.attr);
+		if (ret) {
+			hid_err(hdev, "hid-msi-claw failed to sysfs_create_file dev_attr_reset: %d\n", ret);
+			goto err_dev_attr_reset;
+		}
 	}
 
 	return 0;
 
 err_dev_attr_gamepad_mode_current:
 	sysfs_remove_file(&hdev->dev.kobj, &dev_attr_gamepad_mode_available.attr);
-
 err_dev_attr_mkeys_function_available:
 	sysfs_remove_file(&hdev->dev.kobj, &dev_attr_gamepad_mode_current.attr);
-
 err_dev_attr_mkeys_function_current:
 	sysfs_remove_file(&hdev->dev.kobj, &dev_attr_mkeys_function_available.attr);
-
+err_dev_attr_reset:
+	sysfs_remove_file(&hdev->dev.kobj, &dev_attr_mkeys_function_current.attr);
 err_close:
 	hid_hw_close(hdev);
 err_stop_hw:
