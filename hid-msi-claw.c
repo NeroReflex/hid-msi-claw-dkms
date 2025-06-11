@@ -263,6 +263,19 @@ static int sync_to_rom(struct hid_device *hdev) {
 		goto sync_to_rom_err;
 	}
 
+	ret = msi_claw_await_ack(hdev);
+	if (ret) {
+		hid_err(hdev, "hid-msi-claw failed to await first ack: %d\n", ret);
+		goto msi_claw_switch_gamepad_mode_err;
+	}
+
+	// the sync to rom also triggers two ack
+	ret = msi_claw_await_ack(hdev);
+	if (ret) {
+		hid_err(hdev, "hid-msi-claw failed to await second ack: %d\n", ret);
+		goto msi_claw_switch_gamepad_mode_err;
+	}
+
 	ret = 0;
 
 sync_to_rom_err:
