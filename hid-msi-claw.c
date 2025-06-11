@@ -169,7 +169,7 @@ static int msi_claw_read(struct hid_device *hdev, uint8_t *const buffer, int siz
 			if (event != NULL) {
 				drvdata->read_data = event->next;
 			}
-		}
+		};
 
 		msleep(1);
 	}
