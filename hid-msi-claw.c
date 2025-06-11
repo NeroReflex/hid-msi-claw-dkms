@@ -263,6 +263,8 @@ static int sync_to_rom(struct hid_device *hdev) {
 		goto sync_to_rom_err;
 	}
 
+	ret = 0;
+
 sync_to_rom_err:
 	return ret;
 }
