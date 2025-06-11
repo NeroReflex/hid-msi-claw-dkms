@@ -285,7 +285,7 @@ static int msi_claw_await_ack(struct hid_device *hdev)
 		goto msi_claw_await_ack_err;
 	}
 
-	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 500);
+	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 1000);
 	if (ret < 0) {
 		hid_err(hdev, "hid-msi-claw failed to read ack: %d\n", ret);
 		goto msi_claw_await_ack_err;
@@ -392,7 +392,7 @@ static int msi_claw_read_gamepad_mode(struct hid_device *hdev,
 		goto msi_claw_read_gamepad_mode_err;
 	}
 
-	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 500);
+	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 50);
 	if (ret != MSI_CLAW_READ_SIZE) {
 		hid_err(hdev, "hid-msi-claw failed to read: %d\n", ret);
 		ret = -EINVAL;
