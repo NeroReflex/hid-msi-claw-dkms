@@ -150,7 +150,7 @@ msi_claw_write_cmd_err:
 	return ret;
 }
 
-static int msi_claw_read(struct hid_device *hdev, uint8_t *const buffer, int size, int timeout)
+static int msi_claw_read(struct hid_device *hdev, uint8_t *const buffer, int size, uint32_t timeout)
 {
 	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
 	struct msi_claw_read_data *event = NULL;
@@ -162,7 +162,10 @@ static int msi_claw_read(struct hid_device *hdev, uint8_t *const buffer, int siz
 		goto msi_claw_read_err;
 	}
 
-	for (int i = 0; (event == NULL) && (i <= timeout); i++) {
+	for (uint32_t i = 0; (event == NULL) && (i <= timeout); i++) {
+		if (timeout - i)
+			msleep(1);
+
 		scoped_guard(mutex, &drvdata->read_data_mutex) {
 			event = drvdata->read_data;
 
@@ -170,8 +173,6 @@ static int msi_claw_read(struct hid_device *hdev, uint8_t *const buffer, int siz
 				drvdata->read_data = event->next;
 			}
 		};
-
-		msleep(1);
 	}
 
 	if (event == NULL) {
