@@ -243,6 +243,31 @@ msi_claw_unknown_raw_event:
 	return ret;
 }
 
+static int msi_claw_await_ack(struct hid_device *hdev)
+{
+	uint8_t buffer[MSI_CLAW_READ_SIZE];
+	int ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 60);
+	if (ret < 0) {
+		hid_err(hdev, "hid-msi-claw failed to read ack: %d\n", ret);
+		goto msi_claw_await_ack_err;
+	} else if (ret != MSI_CLAW_READ_SIZE) {
+		hid_err(hdev, "hid-msi-claw invalid read: expected %d bytes, got %d\n", MSI_CLAW_READ_SIZE, ret);
+		ret = -EINVAL;
+		goto msi_claw_await_ack_err;
+	}
+
+	if (buffer[4] != (uint8_t)MSI_CLAW_COMMAND_TYPE_ACK) {
+		hid_err(hdev, "hid-msi-claw received invalid response: expected ack 0x06, got 0x%02x\n", buffer[4]);
+		ret = -EINVAL;
+		goto msi_claw_await_ack_err;
+	}
+
+	ret = 0;
+
+msi_claw_await_ack_err:
+	return ret;
+}
+
 static int sync_to_rom(struct hid_device *hdev) {
 	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
 	int ret;
@@ -266,14 +291,14 @@ static int sync_to_rom(struct hid_device *hdev) {
 	ret = msi_claw_await_ack(hdev);
 	if (ret) {
 		hid_err(hdev, "hid-msi-claw failed to await first ack: %d\n", ret);
-		goto msi_claw_switch_gamepad_mode_err;
+		goto sync_to_rom_err;
 	}
 
 	// the sync to rom also triggers two ack
 	ret = msi_claw_await_ack(hdev);
 	if (ret) {
 		hid_err(hdev, "hid-msi-claw failed to await second ack: %d\n", ret);
-		goto msi_claw_switch_gamepad_mode_err;
+		goto sync_to_rom_err;
 	}
 
 	ret = 0;
@@ -344,31 +369,6 @@ static int msi_claw_read_gamepad_mode(struct hid_device *hdev,
 	ret = 0;
 
 msi_claw_read_gamepad_mode_err:
-	return ret;
-}
-
-static int msi_claw_await_ack(struct hid_device *hdev)
-{
-	uint8_t buffer[MSI_CLAW_READ_SIZE];
-	int ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 60);
-	if (ret < 0) {
-		hid_err(hdev, "hid-msi-claw failed to read ack: %d\n", ret);
-		goto msi_claw_await_ack_err;
-	} else if (ret != MSI_CLAW_READ_SIZE) {
-		hid_err(hdev, "hid-msi-claw invalid read: expected %d bytes, got %d\n", MSI_CLAW_READ_SIZE, ret);
-		ret = -EINVAL;
-		goto msi_claw_await_ack_err;
-	}
-
-	if (buffer[4] != (uint8_t)MSI_CLAW_COMMAND_TYPE_ACK) {
-		hid_err(hdev, "hid-msi-claw received invalid response: expected ack 0x06, got 0x%02x\n", buffer[4]);
-		ret = -EINVAL;
-		goto msi_claw_await_ack_err;
-	}
-
-	ret = 0;
-
-msi_claw_await_ack_err:
 	return ret;
 }
 
