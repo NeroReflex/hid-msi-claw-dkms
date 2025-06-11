@@ -112,6 +112,13 @@ static int msi_claw_write_cmd(struct hid_device *hdev, enum msi_claw_command_typ
 	int ret;
 	const uint8_t buf[MSI_CLAW_WRITE_SIZE] = {
 		MSI_CLAW_FEATURE_GAMEPAD_REPORT_ID, 0, 0, 0x3c, cmdtype };
+
+	if (!drvdata->control) {
+		hid_err(hdev, "hid-msi-claw couldn't find control interface\n");
+		ret = -ENODEV;
+		goto msi_claw_reset_device_err;
+	}
+
 	if (buffer != NULL) {
 		memcpy((void*)&buf[5], buffer, buffer_len);
 	} else {
@@ -146,6 +153,12 @@ static int msi_claw_read(struct hid_device *hdev, uint8_t *const buffer, int siz
 	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
 	struct msi_claw_read_data *event = NULL;
 	int ret = 0;
+
+	if (!drvdata->control) {
+		hid_err(hdev, "hid-msi-claw couldn't find control interface\n");
+		ret = -ENODEV;
+		goto msi_claw_reset_device_err;
+	}
 
 	for (int i = 0; (event == NULL) && (i <= timeout); i++) {
 		msleep(1);
@@ -186,6 +199,11 @@ static int msi_claw_raw_event(struct hid_device *hdev, struct hid_report *report
 {
 	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
 	int ret = 0;
+
+	if (!drvdata->control) {
+		hid_notice(hdev, "hid-msi-claw event not from control interface: ignoring\n");
+		return 0;
+	}
 
 	if (size != MSI_CLAW_READ_SIZE) {
 		//hid_err(hdev, "hid-msi-claw got unknown %d bytes\n", size);
@@ -246,6 +264,13 @@ msi_claw_unknown_raw_event:
 static int msi_claw_await_ack(struct hid_device *hdev)
 {
 	uint8_t buffer[MSI_CLAW_READ_SIZE];
+
+	if (!drvdata->control) {
+		hid_err(hdev, "hid-msi-claw couldn't find control interface\n");
+		ret = -ENODEV;
+		goto msi_claw_reset_device_err;
+	}
+
 	int ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 60);
 	if (ret < 0) {
 		hid_err(hdev, "hid-msi-claw failed to read ack: %d\n", ret);
@@ -314,15 +339,26 @@ static int msi_claw_reset_device(struct hid_device *hdev) {
 	if (!drvdata->control) {
 		hid_err(hdev, "hid-msi-claw couldn't find control interface\n");
 		ret = -ENODEV;
-		return ret;
+		goto msi_claw_reset_device_err;
 	}
 
 	ret = msi_claw_write_cmd(hdev, MSI_CLAW_COMMAND_TYPE_RESET_DEVICE, NULL, 0);
-	if (ret) {
-		hid_err(hdev, "hid-msi-claw failed to send write request to reset controller: %d\n", ret);
-		return ret;
+	if (ret < 0) {
+		hid_err(hdev, "hid-msi-claw failed to send reset: %d\n", ret);
+		goto msi_claw_reset_device_err;
+	} else if (ret != MSI_CLAW_WRITE_SIZE) {
+		hid_err(hdev, "hid-msi-claw couldn't send reset request: %d\n", ret);
+		ret = -EIO;
+		goto msi_claw_reset_device_err;
 	}
 
+	ret = msi_claw_await_ack(hdev);
+	if (ret) {
+		hid_err(hdev, "hid-msi-claw failed to await ack: %d\n", ret);
+		goto msi_claw_reset_device_err;
+	}
+
+msi_claw_reset_device_err:
 	return ret;
 }
 
@@ -441,7 +477,7 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr, co
 	int ret;
 
 	ret = msi_claw_reset_device(hdev);
-	if (ret) {
+	if (ret < 0) {
 		hid_err(hdev, "hid-msi-claw error resetting device: %d\n", ret);
 		goto reset_store_err;
 	}
