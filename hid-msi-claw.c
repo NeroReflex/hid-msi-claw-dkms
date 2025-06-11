@@ -110,13 +110,15 @@ static int msi_claw_write_cmd(struct hid_device *hdev, enum msi_claw_command_typ
     const uint8_t *const buffer, size_t buffer_len)
 {
 	int ret;
+	uint8_t *dmabuf = NULL;
+	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
 	const uint8_t buf[MSI_CLAW_WRITE_SIZE] = {
 		MSI_CLAW_FEATURE_GAMEPAD_REPORT_ID, 0, 0, 0x3c, cmdtype };
 
 	if (!drvdata->control) {
 		hid_err(hdev, "hid-msi-claw couldn't find control interface\n");
 		ret = -ENODEV;
-		goto msi_claw_reset_device_err;
+		goto msi_claw_write_cmd_err;
 	}
 
 	if (buffer != NULL) {
@@ -126,7 +128,7 @@ static int msi_claw_write_cmd(struct hid_device *hdev, enum msi_claw_command_typ
 	}
 
 	memset((void*)&buf[5 + buffer_len], 0, MSI_CLAW_WRITE_SIZE - (5 + buffer_len));
-	uint8_t *const dmabuf = kmemdup(buf, MSI_CLAW_WRITE_SIZE, GFP_KERNEL);
+	dmabuf = kmemdup(buf, MSI_CLAW_WRITE_SIZE, GFP_KERNEL);
 	if (!dmabuf) {
 		ret = -ENOMEM;
 		hid_err(hdev, "hid-msi-claw failed to alloc dma buf: %d\n", ret);
@@ -157,11 +159,10 @@ static int msi_claw_read(struct hid_device *hdev, uint8_t *const buffer, int siz
 	if (!drvdata->control) {
 		hid_err(hdev, "hid-msi-claw couldn't find control interface\n");
 		ret = -ENODEV;
-		goto msi_claw_reset_device_err;
+		goto msi_claw_read_err;
 	}
 
 	for (int i = 0; (event == NULL) && (i <= timeout); i++) {
-		msleep(1);
 		scoped_guard(mutex, &drvdata->read_data_mutex) {
 			event = drvdata->read_data;
 
@@ -169,6 +170,8 @@ static int msi_claw_read(struct hid_device *hdev, uint8_t *const buffer, int siz
 				drvdata->read_data = event->next;
 			}
 		}
+
+		msleep(1);
 	}
 
 	if (event == NULL) {
@@ -263,15 +266,17 @@ msi_claw_unknown_raw_event:
 
 static int msi_claw_await_ack(struct hid_device *hdev)
 {
+	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
 	uint8_t buffer[MSI_CLAW_READ_SIZE];
+	int ret;
 
 	if (!drvdata->control) {
 		hid_err(hdev, "hid-msi-claw couldn't find control interface\n");
 		ret = -ENODEV;
-		goto msi_claw_reset_device_err;
+		goto msi_claw_await_ack_err;
 	}
 
-	int ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 60);
+	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 60);
 	if (ret < 0) {
 		hid_err(hdev, "hid-msi-claw failed to read ack: %d\n", ret);
 		goto msi_claw_await_ack_err;
