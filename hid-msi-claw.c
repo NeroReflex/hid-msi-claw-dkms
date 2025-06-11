@@ -250,15 +250,20 @@ static int sync_to_rom(struct hid_device *hdev) {
 	if (!drvdata->control) {
 		hid_err(hdev, "hid-msi-claw couldn't find control interface\n");
 		ret = -ENODEV;
-		return ret;
+		goto sync_to_rom_err;
 	}
 
 	ret = msi_claw_write_cmd(hdev, MSI_CLAW_COMMAND_TYPE_SYNC_TO_ROM, NULL, 0);
-	if (ret) {
+	if (ret < 0) {
 		hid_err(hdev, "hid-msi-claw failed to send write request for switch controller mode: %d\n", ret);
-		return ret;
+		goto sync_to_rom_err;
+	} else if (ret != MSI_CLAW_WRITE_SIZE) {
+		hid_err(hdev, "hid-msi-claw failed to send the sync to rom command: %d\n", ret);
+		ret = -EIO;
+		goto sync_to_rom_err;
 	}
 
+sync_to_rom_err:
 	return ret;
 }
 
