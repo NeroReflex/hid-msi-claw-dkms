@@ -286,9 +286,9 @@ static int msi_claw_await_ack(struct hid_device *hdev)
 		goto msi_claw_await_ack_err;
 	}
 
-	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 5000);
+	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 1000);
 	if (ret < 0) {
-		hid_err(hdev, "hid-msi-claw failed to read ack in 5000ms: %d\n", ret);
+		hid_err(hdev, "hid-msi-claw failed to read ack: %d\n", ret);
 		goto msi_claw_await_ack_err;
 	} else if (ret != MSI_CLAW_READ_SIZE) {
 		hid_err(hdev, "hid-msi-claw invalid read: expected %d bytes, got %d\n", MSI_CLAW_READ_SIZE, ret);
