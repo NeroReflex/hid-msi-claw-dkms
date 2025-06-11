@@ -198,38 +198,33 @@ msi_claw_read_err:
 	return ret;
 }
 
-static int msi_claw_raw_event(struct hid_device *hdev, struct hid_report *report, uint8_t *data, int size)
+static int msi_claw_raw_event_control(struct hid_device *hdev, struct msi_claw_drvdata *drvdata,
+	struct hid_report *report, uint8_t *data, int size)
 {
-	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
 	int ret = 0;
-
-	if (!drvdata->control) {
-		hid_notice(hdev, "hid-msi-claw event not from control interface: ignoring\n");
-		return 0;
-	}
 
 	if (size != MSI_CLAW_READ_SIZE) {
 		//hid_err(hdev, "hid-msi-claw got unknown %d bytes\n", size);
-		goto msi_claw_unknown_raw_event;
+		goto msi_claw_raw_event_control_err;
 	} else if (data[0] != 0x10) {
 		hid_err(hdev, "hid-msi-claw unrecognised byte at offset 0: expected 0x10, got 0x%02x\n", data[0]);
-		goto msi_claw_unknown_raw_event;
+		goto msi_claw_raw_event_control_err;
 	} else if (data[1] != 0x00) {
 		hid_err(hdev, "hid-msi-claw unrecognised byte at offset 1: expected 0x00, got 0x%02x\n", data[1]);
-		goto msi_claw_unknown_raw_event;
+		goto msi_claw_raw_event_control_err;
 	} else if (data[2] != 0x00) {
 		hid_err(hdev, "hid-msi-claw unrecognised byte at offset 2: expected 0x00, got 0x%02x\n", data[2]);
-		goto msi_claw_unknown_raw_event;
+		goto msi_claw_raw_event_control_err;
 	} else if (data[3] != 0x3c) {
 		hid_err(hdev, "hid-msi-claw unrecognised byte at offset 3: expected 0x3c, got 0x%02x\n", data[3]);
-		goto msi_claw_unknown_raw_event;
+		goto msi_claw_raw_event_control_err;
 	}
 
 	unsigned char *const buffer = (unsigned char *)kmemdup(data, size, GFP_KERNEL);
 	if (!buffer) {
 		ret = -ENOMEM;
 		hid_err(hdev, "hid-msi-claw failed to alloc %d bytes for read buffer: %d\n", size, ret);
-		return ret;
+		goto msi_claw_raw_event_control_err;
 	}
 
 	struct msi_claw_read_data evt = {
@@ -242,7 +237,7 @@ static int msi_claw_raw_event(struct hid_device *hdev, struct hid_report *report
 		ret = -ENOMEM;
 		kfree(buffer);
 		hid_err(hdev, "hid-msi-claw failed to alloc event node: %d\n", ret);
-		return ret;
+		goto msi_claw_raw_event_control_err;
 	}
 
 	scoped_guard(mutex, &drvdata->read_data_mutex) {
@@ -251,17 +246,31 @@ static int msi_claw_raw_event(struct hid_device *hdev, struct hid_report *report
 			list = &(*list)->next;
 		}
 
-		if (*list == NULL) {
-			*list = node;
-			hid_notice(hdev, "hid-msi-claw received %d bytes, cmd: 0x%02x\n", size, buffer[4]);
-		} else {
+		if (*list != NULL) {
 			ret = -EIO;
 			hid_err(hdev, "too many unparsed events: ignoring\n");
+			goto msi_claw_raw_event_control_err;
 		}
+
+		*list = node;
 	}
 
-msi_claw_unknown_raw_event:
+	hid_notice(hdev, "hid-msi-claw received %d bytes, cmd: 0x%02x\n", size, buffer[4]);
+
+msi_claw_raw_event_control_err:
 	return ret;
+}
+
+static int msi_claw_raw_event(struct hid_device *hdev, struct hid_report *report, uint8_t *data, int size)
+{
+	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
+
+	if (drvdata->control)
+		return msi_claw_raw_event_control(hdev, drvdata, report, data, size);
+	else
+		hid_notice(hdev, "hid-msi-claw event not from control interface: ignoring\n");
+
+	return 0;
 }
 
 static int msi_claw_await_ack(struct hid_device *hdev)
@@ -276,7 +285,7 @@ static int msi_claw_await_ack(struct hid_device *hdev)
 		goto msi_claw_await_ack_err;
 	}
 
-	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 60);
+	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 500);
 	if (ret < 0) {
 		hid_err(hdev, "hid-msi-claw failed to read ack: %d\n", ret);
 		goto msi_claw_await_ack_err;
@@ -383,7 +392,7 @@ static int msi_claw_read_gamepad_mode(struct hid_device *hdev,
 		goto msi_claw_read_gamepad_mode_err;
 	}
 
-	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 60);
+	ret = msi_claw_read(hdev, buffer, MSI_CLAW_READ_SIZE, 500);
 	if (ret != MSI_CLAW_READ_SIZE) {
 		hid_err(hdev, "hid-msi-claw failed to read: %d\n", ret);
 		ret = -EINVAL;
