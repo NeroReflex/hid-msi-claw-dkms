@@ -364,7 +364,6 @@ static int msi_claw_switch_gamepad_mode(struct hid_device *hdev,
 {
 	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
 	struct msi_claw_control_status check_status;
-	uint8_t buffer[MSI_CLAW_READ_SIZE] = {};
 	const uint8_t cmd_buffer[2] = {(uint8_t)status->gamepad_mode, (uint8_t)status->mkeys_function};
 	int ret;
 
