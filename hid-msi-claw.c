@@ -712,8 +712,6 @@ static int msi_claw_probe(struct hid_device *hdev, const struct hid_device_id *i
 		goto err_stop_hw;
 	}
 
-//	hid_err(hdev, "hid-msi-claw on %d\n", (int)hdev->rdesc[0]);
-
 	if (hdev->rdesc[0] == MSI_CLAW_DEVICE_CONTROL_DESC) {
 		drvdata->control = devm_kzalloc(&hdev->dev, sizeof(*(drvdata->control)), GFP_KERNEL);
 		if (drvdata->control == NULL) {
@@ -790,6 +788,7 @@ static void msi_claw_remove(struct hid_device *hdev)
 }
 
 static int msi_claw_resume(struct hid_device *hdev) {
+/*
 	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
 
 	int ret = 0;
@@ -807,6 +806,8 @@ static int msi_claw_resume(struct hid_device *hdev) {
 
 msi_claw_resume_err:
 	return ret;
+*/
+	return 0;
 }
 
 static int msi_claw_suspend(struct hid_device *hdev, pm_message_t event) {
