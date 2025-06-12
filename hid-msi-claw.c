@@ -787,49 +787,6 @@ static void msi_claw_remove(struct hid_device *hdev)
 	hid_hw_stop(hdev);
 }
 
-static int msi_claw_resume(struct hid_device *hdev) {
-/*
-	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
-
-	int ret = 0;
-
-	if (drvdata->control) {
-		// the hardware needs some time to re-initialize
-		ssleep(3);
-
-		ret = msi_claw_switch_gamepad_mode(hdev, drvdata->control);
-		if (ret) {
-			hid_err(hdev, "hid-msi-claw failed to resume gamepad to previous status: %d\n", ret);
-			goto msi_claw_resume_err;
-		}
-	}
-
-msi_claw_resume_err:
-	return ret;
-*/
-	return 0;
-}
-
-static int msi_claw_suspend(struct hid_device *hdev, pm_message_t event) {
-	struct msi_claw_drvdata *drvdata = hid_get_drvdata(hdev);
-	struct msi_claw_control_status status;
-
-	int ret = 0;
-
-	if (drvdata->control) {
-		ret = msi_claw_read_gamepad_mode(hdev, &status);
-		if (ret) {
-			hid_err(hdev, "hid-msi-claw failed to read gamepad status: %d\n", ret);
-			goto msi_claw_suspend_err;
-		}
-
-		memcpy((void*)drvdata->control, (const void*)&status, sizeof(struct msi_claw_control_status));
-	}
-
-msi_claw_suspend_err:
-	return ret;
-}
-
 static const struct hid_device_id msi_claw_devices[] = {
 	{ HID_USB_DEVICE(0x0DB0, 0x1901) },
 	{ }
@@ -842,8 +799,6 @@ static struct hid_driver msi_claw_driver = {
 	.raw_event		= msi_claw_raw_event,
 	.probe			= msi_claw_probe,
 	.remove			= msi_claw_remove,
-	.suspend		= msi_claw_suspend,
-	.resume			= msi_claw_resume,
 };
 module_hid_driver(msi_claw_driver);
 
